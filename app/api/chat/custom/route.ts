@@ -11,7 +11,7 @@ import { OpenAIStream, StreamingTextResponse } from "ai"
 export async function POST(request: Request) {
   try {
     const json = await request.json()
-    const { customModelId } = json as {
+    /*const { customModelId } = json as {
       customModelId: string
     }
 
@@ -29,13 +29,14 @@ export async function POST(request: Request) {
     if (!customModel) {
       throw new Error(error.message)
     }
-
+    */
+    
     // Create a custom HTTPS agent that ignores SSL certificate verification
     const httpsAgent = new https.Agent({
       rejectUnauthorized: false // WARNING: This bypasses SSL certificate verification
     })
 
-    const externalApiResponse = await fetch(customModel.base_url, {
+    const externalApiResponse = await fetch("https://ec2-3-1-50-45.ap-southeast-1.compute.amazonaws.com:5678/webhook/c891fecd-8aad-4a7c-b5b3-a5772ca095a7", {
       method: "POST",
       headers: {
         Accept: "application/json",
