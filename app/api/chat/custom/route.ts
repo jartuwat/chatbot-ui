@@ -1,22 +1,20 @@
-import { Database } from "@/supabase/types"
-import { ChatSettings } from "@/types"
-import { createClient } from "@supabase/supabase-js"
-import { OpenAIStream, StreamingTextResponse } from "ai"
-import { ServerRuntime } from "next"
-import OpenAI from "openai"
-import { ChatCompletionCreateParamsBase } from "openai/resources/chat/completions.mjs"
+import fetch from "node-fetch"
+import https from "https"
 
-export const runtime: ServerRuntime = "edge"
+export const runtime = "nodejs"
+
+import { Database } from "@/supabase/types"
+import { createClient } from "@supabase/supabase-js"
+
+import { OpenAIStream, StreamingTextResponse } from "ai"
 
 export async function POST(request: Request) {
-  const json = await request.json()
-  const { chatSettings, messages, customModelId } = json as {
-    chatSettings: ChatSettings
-    messages: any[]
-    customModelId: string
-  }
-
   try {
+    const json = await request.json()
+    const { customModelId } = json as {
+      customModelId: string
+    }
+
     const supabaseAdmin = createClient<Database>(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -32,35 +30,62 @@ export async function POST(request: Request) {
       throw new Error(error.message)
     }
 
-    const custom = new OpenAI({
-      apiKey: customModel.api_key || "",
-      baseURL: customModel.base_url
+    // Create a custom HTTPS agent that ignores SSL certificate verification
+    const httpsAgent = new https.Agent({
+      rejectUnauthorized: false // WARNING: This bypasses SSL certificate verification
     })
 
-    const response = await custom.chat.completions.create({
-      model: chatSettings.model as ChatCompletionCreateParamsBase["model"],
-      messages: messages as ChatCompletionCreateParamsBase["messages"],
-      temperature: chatSettings.temperature,
-      stream: true
+    const externalApiResponse = await fetch(customModel.base_url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(json),
+      agent: httpsAgent // Use the custom agent
     })
 
-    const stream = OpenAIStream(response)
-
-    return new StreamingTextResponse(stream)
-  } catch (error: any) {
-    let errorMessage = error.message || "An unexpected error occurred"
-    const errorCode = error.status || 500
-
-    if (errorMessage.toLowerCase().includes("api key not found")) {
-      errorMessage =
-        "Custom API Key not found. Please set it in your profile settings."
-    } else if (errorMessage.toLowerCase().includes("incorrect api key")) {
-      errorMessage =
-        "Custom API Key is incorrect. Please fix it in your profile settings."
+    if (!externalApiResponse.ok) {
+      throw new Error(
+        `HTTP error! status: ${externalApiResponse.status} - ${await externalApiResponse.text()}`
+      )
     }
 
-    return new Response(JSON.stringify({ message: errorMessage }), {
-      status: errorCode
+    const response = await externalApiResponse.text()
+
+    if (response.startsWith("{") || response.startsWith("[")) {
+      try {
+        const jsonResponse = JSON.parse(response) // Attempt to parse if it looks like JSON
+        console.log(jsonResponse)
+      } catch (error) {
+        console.error("Failed to parse JSON:", error)
+      }
+    } else {
+      console.log("Response is plain text:", response) // Handle non-JSON response
+    }
+
+    return new Response(response, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json"
+      }
     })
+  } catch (error: any) {
+    console.error("Detailed error:", error)
+
+    return new Response(
+      JSON.stringify({
+        error: "An error occurred",
+        details: error.message,
+        stack: error.stack,
+        name: error.name
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json"
+        }
+      }
+    )
   }
 }
